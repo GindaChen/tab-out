@@ -1435,6 +1435,190 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // ---- defer-single-tab: save one tab for later, then close it ----
+  if (action === 'defer-single-tab') {
+    e.stopPropagation(); // don't trigger the parent chip's focus-tab
+    const tabUrl   = actionEl.dataset.tabUrl;
+    const tabTitle = actionEl.dataset.tabTitle || tabUrl;
+    if (!tabUrl) return;
+
+    // Save to the deferred list on the server
+    try {
+      await fetch('/api/defer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabs: [{ url: tabUrl, title: tabTitle }] }),
+      });
+    } catch (err) {
+      console.error('[TMC] Failed to defer tab:', err);
+      showToast('Failed to save tab');
+      return;
+    }
+
+    // Close the tab in the browser
+    await sendToExtension('closeTabs', { urls: [tabUrl] });
+    await fetchOpenTabs();
+
+    // Animate the chip out
+    const chip = actionEl.closest('.page-chip');
+    if (chip) {
+      chip.style.transition = 'opacity 0.2s, transform 0.2s';
+      chip.style.opacity = '0';
+      chip.style.transform = 'scale(0.8)';
+      setTimeout(() => chip.remove(), 200);
+    }
+
+    showToast('Saved for later');
+    // Refresh the deferred column to show the new item
+    await renderDeferredColumn();
+    return;
+  }
+
+  // ---- defer-mission-tabs: save all tabs in an AI mission for later ----
+  if (action === 'defer-mission-tabs') {
+    const stableId = actionEl.dataset.openMissionId;
+    const mission = openTabMissions.find(m => m._stableId === stableId);
+    if (!mission) return;
+
+    const tabs = (mission.tabs || []).map(t => ({
+      url: t.url,
+      title: t.title || t.url,
+      source_mission: mission.name || null,
+    }));
+
+    try {
+      await fetch('/api/defer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabs }),
+      });
+    } catch (err) {
+      console.error('[TMC] Failed to defer mission tabs:', err);
+      showToast('Failed to save tabs');
+      return;
+    }
+
+    // Close all tabs in the mission
+    const urls = tabs.map(t => t.url);
+    await closeTabsByUrls(urls);
+
+    // Animate the card out
+    if (card) {
+      playCloseSound();
+      animateCardOut(card);
+    }
+
+    const idx = openTabMissions.indexOf(mission);
+    if (idx !== -1) openTabMissions.splice(idx, 1);
+
+    showToast(`Saved ${tabs.length} tab${tabs.length !== 1 ? 's' : ''} for later`);
+    await renderDeferredColumn();
+    return;
+  }
+
+  // ---- defer-domain-tabs: save all tabs in a domain group for later ----
+  if (action === 'defer-domain-tabs') {
+    const domainId = actionEl.dataset.domainId;
+    const group = domainGroups.find(g => {
+      const id = 'domain-' + g.domain.replace(/[^a-z0-9]/g, '-');
+      return id === domainId;
+    });
+    if (!group) return;
+
+    const tabs = (group.tabs || []).map(t => ({
+      url: t.url,
+      title: t.title || t.url,
+      source_mission: group.domain || null,
+    }));
+
+    try {
+      await fetch('/api/defer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabs }),
+      });
+    } catch (err) {
+      console.error('[TMC] Failed to defer domain tabs:', err);
+      showToast('Failed to save tabs');
+      return;
+    }
+
+    // Close all tabs in the domain group
+    const urls = tabs.map(t => t.url);
+    await closeTabsByUrls(urls);
+
+    if (card) {
+      playCloseSound();
+      animateCardOut(card);
+    }
+
+    const idx = domainGroups.indexOf(group);
+    if (idx !== -1) domainGroups.splice(idx, 1);
+
+    showToast(`Saved ${tabs.length} tab${tabs.length !== 1 ? 's' : ''} from ${group.domain}`);
+    await renderDeferredColumn();
+    return;
+  }
+
+  // ---- check-deferred: check off a deferred tab (mark as read) ----
+  if (action === 'check-deferred') {
+    const id = actionEl.dataset.deferredId;
+    if (!id) return;
+
+    try {
+      await fetch(`/api/deferred/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked: true }),
+      });
+    } catch (err) {
+      console.error('[TMC] Failed to check deferred tab:', err);
+      return;
+    }
+
+    // Animate the item: add strikethrough, then slide out
+    const item = actionEl.closest('.deferred-item');
+    if (item) {
+      item.classList.add('checked');
+      setTimeout(() => {
+        item.classList.add('removing');
+        setTimeout(() => {
+          item.remove();
+          renderDeferredColumn(); // refresh to update counts and archive
+        }, 300);
+      }, 800);
+    }
+    return;
+  }
+
+  // ---- dismiss-deferred: dismiss a deferred tab without reading ----
+  if (action === 'dismiss-deferred') {
+    const id = actionEl.dataset.deferredId;
+    if (!id) return;
+
+    try {
+      await fetch(`/api/deferred/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dismissed: true }),
+      });
+    } catch (err) {
+      console.error('[TMC] Failed to dismiss deferred tab:', err);
+      return;
+    }
+
+    // Animate the item out
+    const item = actionEl.closest('.deferred-item');
+    if (item) {
+      item.classList.add('removing');
+      setTimeout(() => {
+        item.remove();
+        renderDeferredColumn(); // refresh counts and archive
+      }, 300);
+    }
+    return;
+  }
+
   // ---- close-domain-tabs: close all tabs in a static domain group ----
   if (action === 'close-domain-tabs') {
     const domainId = actionEl.dataset.domainId;
@@ -1652,6 +1836,48 @@ document.addEventListener('click', async (e) => {
     }
     showToast(`Closed ${tabsToClose.length} tab${tabsToClose.length !== 1 ? 's' : ''} from ${domain}`);
     await updateStaleCount();
+  }
+});
+
+// ---- Archive toggle — expand/collapse the archive section ----
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('#archiveToggle');
+  if (!toggle) return;
+
+  toggle.classList.toggle('open');
+  const body = document.getElementById('archiveBody');
+  if (body) {
+    body.style.display = body.style.display === 'none' ? 'block' : 'none';
+  }
+});
+
+// ---- Archive search — filter archived items as user types ----
+document.addEventListener('input', async (e) => {
+  if (e.target.id !== 'archiveSearch') return;
+
+  const q = e.target.value.trim();
+  const archiveList = document.getElementById('archiveList');
+  if (!archiveList) return;
+
+  if (q.length < 2) {
+    // Show all archived items (re-fetch from the already-loaded data)
+    await renderDeferredColumn();
+    // Re-open the archive after re-render
+    const toggle = document.getElementById('archiveToggle');
+    const body = document.getElementById('archiveBody');
+    if (toggle) toggle.classList.add('open');
+    if (body) body.style.display = 'block';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/deferred/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    archiveList.innerHTML = (data.results || []).map(item => renderArchiveItem(item)).join('')
+      || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No results</div>';
+  } catch (err) {
+    console.warn('[TMC] Archive search failed:', err);
   }
 });
 
