@@ -41,10 +41,6 @@ const {
   searchDeferredArchived,
 } = require('./db');
 
-// Pull in the AI clustering function for live open tabs
-// clusterOpenTabs() — clusters currently open tabs ephemerally (no DB)
-const { clusterOpenTabs } = require('./clustering');
-
 // An Express Router is like a mini-app: it holds a group of related routes.
 // We export it and mount it on the main Express app in index.js.
 const router = express.Router();
@@ -234,118 +230,6 @@ router.get('/stats', (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/cluster-tabs
-//
-// NEW endpoint for the "Right now" section.
-//
-// Receives an array of currently open browser tabs from the dashboard,
-// filters out chrome:// and extension pages, then asks LLM to cluster
-// them into missions. Results are NOT stored in the database — this is purely
-// ephemeral, recalculated fresh on every page load.
-//
-// Request body:  { tabs: [{ url, title, tabId }] }
-// Response body: { missions: [{ name, summary, tabs: [{ url, title, tabId }] }] }
-// ─────────────────────────────────────────────────────────────────────────────
-// Cache for tab clustering — avoids calling LLM if tabs haven't changed.
-// We also cache the personalMessage alongside the missions so a cache hit
-// can still show the witty one-liner without an extra AI call.
-let clusterCache = { urlKey: '', result: null, personalMessage: null };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/cluster-tabs/cached
-//
-// Returns the cached clustering result WITHOUT triggering a new AI call.
-// The dashboard sends the computed urlKey (sorted URLs joined by |) as a
-// query parameter. If our cache matches, we return the result immediately.
-// If there's no cache or the key doesn't match, we return { cached: false }.
-//
-// This lets the dashboard check "did we already organize these tabs?" on load
-// without spending API credits.
-//
-// Query param: ?urlKey=<sorted-urls-joined-by-pipe>
-// Response:    { cached: true, missions: [...], duplicates: [...] }
-//           or { cached: false }
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/cluster-tabs/cached', (req, res) => {
-  const { urlKey } = req.query;
-
-  // If we have a cached result AND it matches the current tab set, return it.
-  // We pass personalMessage through too so the UI can show the AI's witty note.
-  if (urlKey && clusterCache.urlKey === urlKey && clusterCache.result) {
-    console.log('[routes] GET /cluster-tabs/cached — cache hit');
-    return res.json({
-      cached: true,
-      missions: clusterCache.result,
-      personalMessage: clusterCache.personalMessage || null,
-    });
-  }
-
-  // No match — tell the dashboard it needs to call POST /cluster-tabs
-  console.log('[routes] GET /cluster-tabs/cached — cache miss');
-  res.json({ cached: false });
-});
-
-router.post('/cluster-tabs', async (req, res) => {
-  const { tabs } = req.body;
-
-  if (!Array.isArray(tabs) || tabs.length === 0) {
-    return res.status(400).json({ error: 'Request body must include a non-empty tabs array.' });
-  }
-
-  // Filter out browser-internal pages
-  const filteredTabs = tabs.filter(tab => {
-    const url = tab.url || '';
-    return (
-      !url.startsWith('chrome://') &&
-      !url.startsWith('chrome-extension://') &&
-      !url.startsWith('about:') &&
-      !url.startsWith('edge://') &&
-      !url.startsWith('brave://') &&
-      url.length > 0
-    );
-  });
-
-  if (filteredTabs.length === 0) {
-    return res.json({ missions: [], duplicates: [] });
-  }
-
-  // Detect duplicate tabs (same URL open multiple times)
-  const urlCounts = {};
-  for (const tab of filteredTabs) {
-    urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
-  }
-  const duplicates = Object.entries(urlCounts)
-    .filter(([, count]) => count > 1)
-    .map(([url, count]) => {
-      const tab = filteredTabs.find(t => t.url === url);
-      return { url, title: tab.title, count };
-    });
-
-  // Cache key: sorted URLs joined — if tabs haven't changed, skip the API call
-  const urlKey = filteredTabs.map(t => t.url).sort().join('|');
-
-  if (clusterCache.urlKey === urlKey && clusterCache.result) {
-    console.log('[routes] Tab clustering cache hit — skipping LLM call');
-    return res.json({
-      missions: clusterCache.result,
-      duplicates,
-      personalMessage: clusterCache.personalMessage || null,
-    });
-  }
-
-  try {
-    // clusterOpenTabs now returns { missions, personalMessage }
-    const { missions, personalMessage } = await clusterOpenTabs(filteredTabs);
-    // Cache both the missions and the personalMessage
-    clusterCache = { urlKey, result: missions, personalMessage: personalMessage || null };
-    res.json({ missions, duplicates, personalMessage: personalMessage || null });
-  } catch (err) {
-    console.error('[routes] POST /cluster-tabs failed:', err.message);
-    res.status(500).json({ error: 'Failed to cluster tabs: ' + err.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/update-status
 //
 // Returns the current update-check result so the dashboard can decide whether
@@ -402,7 +286,13 @@ router.post('/update', (req, res) => {
   // exec() runs a command asynchronously and calls back with (error, stdout, stderr).
   // We use exec (not execSync) here so the HTTP request thread doesn't block —
   // git pull can take several seconds on a slow connection.
-  exec('git pull origin main', { cwd: PROJECT_ROOT, timeout: 60000 }, (gitErr, gitOut, gitStderr) => {
+  // git fetch + reset --hard grabs the latest remote code and overwrites local files.
+  // This is safer than git pull for a self-updating app — no merge conflicts possible.
+  // Any local edits get overwritten, which is fine because the remote IS the source of truth.
+  exec(
+    'git fetch origin main && git reset --hard origin/main',
+    { cwd: PROJECT_ROOT, timeout: 60000 },
+    (gitErr, gitOut, gitStderr) => {
 
     if (gitErr) {
       // git pull failed — could be a merge conflict, no network, etc.

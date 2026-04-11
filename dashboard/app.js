@@ -312,11 +312,8 @@ function showToast(message) {
  * are gone (the grid is empty), we swap in a fun empty state instead of
  * showing a blank, lifeless grid.
  *
- * Only activates in AI view (isAIView = true), since the static domain
- * view handles its own zero-tabs case separately.
  */
 function checkAndShowEmptyState() {
-  if (!isAIView) return;
 
   const missionsEl = document.getElementById('openTabsMissions');
   if (!missionsEl) return;
@@ -728,162 +725,6 @@ const ICONS = {
 
 
 /* ----------------------------------------------------------------
-   MISSION CARD RENDERERS
-
-   renderOpenTabsMissionCard() — for "Right now" section.
-   Shows currently open tabs as chips. Has "Close all" button.
-   These missions come from /api/cluster-tabs (ephemeral, live).
-   ---------------------------------------------------------------- */
-
-/**
- * renderOpenTabsMissionCard(mission, missionIndex)
- *
- * Builds the HTML for a single "Right now" mission card.
- * The mission object comes from /api/cluster-tabs and has this shape:
- *   { name, summary, tabs: [{ url, title, tabId }] }
- *
- * @param {Object} mission      - Mission object from cluster-tabs API
- * @param {number} missionIndex - 0-based index, used as a fallback ID
- * @returns {string}            - HTML string ready for innerHTML
- */
-function renderOpenTabsMissionCard(mission, missionIndex) {
-  const tabs = mission.tabs || [];
-  const tabCount = tabs.length;
-
-  // Tab count badge — always shown since every card has open tabs by definition
-  const tabBadge = `<span class="open-tabs-badge">
-    ${ICONS.tabs}
-    ${tabCount} tab${tabCount !== 1 ? 's' : ''} open
-  </span>`;
-
-  // Check if any tabs in this mission are duplicates
-  const dupeMap = window._dupeUrlMap || {};
-  const missionHasDupes = tabs.some(t => dupeMap[t.url]);
-
-  // Page chips — one per actual open tab (up to 5 shown, rest summarized)
-  // Show up to 8 tabs (more room now that each is a full row)
-  const visibleTabs = tabs.slice(0, 8);
-  const extraCount  = tabs.length - visibleTabs.length;
-  const pageChips = visibleTabs.map(tab => {
-    let tabHostname = '';
-    try { tabHostname = new URL(tab.url).hostname; } catch {}
-    const label   = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), tabHostname);
-    const dupeCount = dupeMap[tab.url];
-    const dupeTag = dupeCount ? ` <span class="chip-dupe-badge">(${dupeCount}x)</span>` : '';
-    const safeUrl = (tab.url || '').replace(/"/g, '&quot;');
-    const safeTitle = label.replace(/"/g, '&quot;');
-    // Extract domain for the favicon
-    let domain = '';
-    try { domain = new URL(tab.url).hostname; } catch {}
-    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
-    return `<div class="page-chip clickable" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
-      <span class="chip-text">${label}${dupeTag}</span>
-      <div class="chip-actions">
-        <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
-        </button>
-        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-        </button>
-      </div>
-    </div>`;
-  }).join('') + (extraCount > 0 ? `<div class="page-chip page-chip-overflow"><span class="chip-text">+${extraCount} more</span></div>` : '');
-
-  // Use a stable ID based on mission name (not array index, which shifts when
-  // earlier missions are closed). This way closing mission #2 doesn't break
-  // the button on mission #5.
-  const stableId = mission._stableId || missionIndex;
-
-  // Get duplicate URLs that belong to this mission
-  const missionDupeUrls = tabs.filter(t => dupeMap[t.url]).map(t => t.url);
-  const uniqueDupeUrls = [...new Set(missionDupeUrls)];
-
-  let actionsHtml = '';
-  if (tabCount > 0) {
-    actionsHtml += `
-      <button class="action-btn save-tabs" data-action="defer-mission-tabs" data-open-mission-id="${stableId}">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
-        Save all for later
-      </button>
-      <button class="action-btn close-tabs" data-action="close-open-tabs" data-open-mission-id="${stableId}">
-        ${ICONS.close}
-        Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
-      </button>`;
-  }
-  if (uniqueDupeUrls.length > 0) {
-    const extraDupes = uniqueDupeUrls.reduce((s, u) => s + dupeMap[u] - 1, 0);
-    actionsHtml += `
-      <button class="action-btn" data-action="dedup-keep-one" data-dupe-urls="${uniqueDupeUrls.map(u => encodeURIComponent(u)).join(',')}">
-        Close ${extraDupes} duplicate${extraDupes !== 1 ? 's' : ''}
-      </button>`;
-  }
-
-  return `
-    <div class="mission-card has-active-bar" data-open-mission-id="${stableId}">
-      <div class="status-bar active"></div>
-      <div class="mission-content">
-        <div class="mission-top">
-          <span class="mission-name">${mission.name || 'Unnamed Mission'}</span>
-          <span class="mission-tag active">Open</span>
-          ${tabBadge}
-        </div>
-        <div class="mission-summary">${mission.summary || ''}</div>
-        <div class="mission-pages">${pageChips}</div>
-        ${actionsHtml ? `<div class="actions">${actionsHtml}</div>` : ''}
-      </div>
-      <div class="mission-meta">
-        <div class="mission-page-count">${tabCount}</div>
-        <div class="mission-page-label">tabs</div>
-      </div>
-    </div>`;
-}
-
-// Keep the old renderMissionCard() for any legacy use (e.g. handleCloseAllStale)
-// but it's no longer called by renderDashboard().
-function renderMissionCard(mission, openTabCount) {
-  const status = mission.status || 'active';
-  const statusBarClass = status;
-  let tagLabel = '';
-  if (status === 'active') {
-    tagLabel = 'Active';
-  } else {
-    tagLabel = timeAgo(mission.last_activity)
-      .replace(' ago', '')
-      .replace('yesterday', '1 day')
-      .replace(' hrs', 'h')
-      .replace(' hr', 'h')
-      .replace(' min', 'm');
-  }
-  const tabBadge = openTabCount > 0
-    ? `<span class="open-tabs-badge" data-mission-id="${mission.id}">${ICONS.tabs} ${openTabCount} tab${openTabCount !== 1 ? 's' : ''} open</span>`
-    : '';
-  const pages = (mission.urls || []).slice(0, 4);
-  const pageChips = pages.map(page => {
-    const label = page.title || page.url || page;
-    const display = label.length > 40 ? label.slice(0, 40) + '…' : label;
-    return `<span class="page-chip">${display}</span>`;
-  }).join('');
-  const pageCount = (mission.urls || []).length;
-  const metaHtml = `<div class="mission-meta"><div class="mission-time">${timeAgo(mission.last_activity)}</div><div class="mission-page-count">${pageCount}</div><div class="mission-page-label">pages</div></div>`;
-  return `
-    <div class="mission-card" data-mission-id="${mission.id}">
-      <div class="status-bar ${statusBarClass}"></div>
-      <div class="mission-content">
-        <div class="mission-top">
-          <span class="mission-name">${mission.name || 'Unnamed Mission'}</span>
-          <span class="mission-tag ${statusBarClass}">${tagLabel}</span>
-          ${tabBadge}
-        </div>
-        <div class="mission-summary">${mission.summary || ''}</div>
-        <div class="mission-pages">${pageChips}</div>
-      </div>
-      ${metaHtml}
-    </div>`;
-}
-
-
-/* ----------------------------------------------------------------
    SCATTER BAR RENDERER
 
    The scatter bar is the 10-dot "focus level" indicator in the
@@ -942,48 +783,13 @@ function renderScatterBar(tabCount, domainCount) {
  *
  * If message is null or empty, we hide the element gracefully.
  */
-function renderPersonalMessage(message) {
-  // Find or create the personal message element.
-  // We insert it right before the #openTabsMissions grid.
-  let el = document.getElementById('aiPersonalMessage');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'aiPersonalMessage';
-    // Insert before the missions grid
-    const missionsEl = document.getElementById('openTabsMissions');
-    if (missionsEl && missionsEl.parentNode) {
-      missionsEl.parentNode.insertBefore(el, missionsEl);
-    }
-  }
-
-  if (message) {
-    el.className = 'ai-personal-message';
-    // Use a left-open quotation mark as a decorative element, then the message text
-    el.innerHTML = `<span class="ai-personal-message-quote">&ldquo;</span>${message}`;
-    el.style.display = '';
-  } else {
-    el.style.display = 'none';
-  }
-}
-
-
 /* ----------------------------------------------------------------
-   IN-MEMORY STORE FOR OPEN-TAB MISSIONS
+   IN-MEMORY STORE FOR OPEN-TAB GROUPS
 
-   Because /api/cluster-tabs missions are ephemeral (not in the DB),
-   we keep them in memory so the click handler can look them up when
-   a "Close all" button is pressed.
-
-   openTabMissions is repopulated every time renderAIDashboard() runs.
    domainGroups is populated by renderStaticDashboard().
    ---------------------------------------------------------------- */
-let openTabMissions = [];
+let domainGroups    = [];
 let duplicateTabs   = [];
-let domainGroups    = []; // domain-grouped tabs for the static view
-let currentPersonalMessage = null; // the AI's witty one-liner about the current tab set
-
-// Tracks whether we're currently showing the AI view or the static view
-let isAIView = false;
 
 
 /* ----------------------------------------------------------------
@@ -1010,6 +816,29 @@ function getRealTabs() {
   });
 }
 
+/**
+ * checkTabOutDupes()
+ *
+ * Counts how many Tab Out new-tab pages are open (they show up as
+ * chrome-extension://XXXXX/newtab.html in the tab list). If more than 1,
+ * shows a banner offering to close the extras.
+ */
+function checkTabOutDupes() {
+  // Each tab has an isTabOut flag set by the extension's handleGetTabs()
+  const tabOutTabs = openTabs.filter(t => t.isTabOut);
+
+  const banner  = document.getElementById('tabOutDupeBanner');
+  const countEl = document.getElementById('tabOutDupeCount');
+  if (!banner) return;
+
+  if (tabOutTabs.length > 1) {
+    if (countEl) countEl.textContent = tabOutTabs.length;
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 
 /* ----------------------------------------------------------------
    DOMAIN CARD RENDERER (for static default view)
@@ -1018,6 +847,45 @@ function getRealTabs() {
    by domain (e.g. all github.com tabs together) and show a card
    per domain. No AI required — pure JS.
    ---------------------------------------------------------------- */
+
+/**
+ * buildOverflowChips(hiddenTabs, urlCounts)
+ *
+ * Builds the expandable "+N more" section for tab lists that exceed 8 items.
+ * Returns HTML string with hidden chips and a clickable expand button.
+ * Used by both AI mission cards and domain cards.
+ */
+function buildOverflowChips(hiddenTabs, urlCounts = {}) {
+  const hiddenChips = hiddenTabs.map(tab => {
+    const label   = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), '');
+    const count   = urlCounts[tab.url] || 1;
+    const dupeTag = count > 1 ? ` <span class="chip-dupe-badge">(${count}x)</span>` : '';
+    const chipClass = count > 1 ? ' chip-has-dupes' : '';
+    const safeUrl = (tab.url || '').replace(/"/g, '&quot;');
+    const safeTitle = label.replace(/"/g, '&quot;');
+    let domain = '';
+    try { domain = new URL(tab.url).hostname; } catch {}
+    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+    return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
+      <span class="chip-text">${label}${dupeTag}</span>
+      <div class="chip-actions">
+        <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+        </button>
+        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="page-chips-overflow" style="display:none">${hiddenChips}</div>
+    <div class="page-chip page-chip-overflow clickable" data-action="expand-chips">
+      <span class="chip-text">+${hiddenTabs.length} more</span>
+    </div>`;
+}
 
 /**
  * renderDomainCard(group, groupIndex)
@@ -1031,6 +899,7 @@ function getRealTabs() {
 function renderDomainCard(group, groupIndex) {
   const tabs      = group.tabs || [];
   const tabCount  = tabs.length;
+  const isLanding = group.domain === '__landing-pages__';
   const stableId  = 'domain-' + group.domain.replace(/[^a-z0-9]/g, '-');
 
   // Detect duplicates within this domain group (same URL multiple times)
@@ -1091,7 +960,7 @@ function renderDomainCard(group, groupIndex) {
         </button>
       </div>
     </div>`;
-  }).join('') + (extraCount > 0 ? `<div class="page-chip page-chip-overflow"><span class="chip-text">+${extraCount} more</span></div>` : '');
+  }).join('') + (extraCount > 0 ? buildOverflowChips(uniqueTabs.slice(8), urlCounts) : '');
 
   // Use amber status bar if there are duplicates
   const statusBarClass = hasDupes ? 'active' : 'neutral';
@@ -1099,10 +968,6 @@ function renderDomainCard(group, groupIndex) {
 
   // Actions: always show save all + close all, add "Close duplicates" if dupes exist
   let actionsHtml = `
-    <button class="action-btn save-tabs" data-action="defer-domain-tabs" data-domain-id="${stableId}">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
-      Save all for later
-    </button>
     <button class="action-btn close-tabs" data-action="close-domain-tabs" data-domain-id="${stableId}">
       ${ICONS.close}
       Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
@@ -1121,8 +986,8 @@ function renderDomainCard(group, groupIndex) {
       <div class="status-bar"${statusBarStyle}></div>
       <div class="mission-content">
         <div class="mission-top">
-          <span class="mission-name">${friendlyDomain(group.domain)}</span>
-          <span class="mission-tag neutral">Domain</span>
+          <span class="mission-name">${isLanding ? 'Landing pages' : friendlyDomain(group.domain)}</span>
+          <span class="mission-tag neutral">${isLanding ? 'Homepages & feeds' : 'Domain'}</span>
           ${tabBadge}
           ${dupeBadge}
         </div>
@@ -1280,8 +1145,6 @@ function renderArchiveItem(item) {
  * 7. Update scatter bar + footer stats
  */
 async function renderStaticDashboard() {
-  isAIView = false;
-
   // --- Header: greeting + date ---
   const greetingEl = document.getElementById('greeting');
   const dateEl     = document.getElementById('dateDisplay');
@@ -1292,37 +1155,46 @@ async function renderStaticDashboard() {
   await fetchOpenTabs();
   const realTabs = getRealTabs();
 
-  // ── Step 2: Cache check — did we already organize these exact tabs? ───────
-  // Build the same URL key the server uses: sorted tab URLs joined by |
-  if (realTabs.length > 0) {
-    const urlKey = realTabs.map(t => t.url).sort().join('|');
-    try {
-      const cacheRes = await fetch(`/api/cluster-tabs/cached?urlKey=${encodeURIComponent(urlKey)}`);
-      if (cacheRes.ok) {
-        const cacheData = await cacheRes.json();
-        if (cacheData.cached && cacheData.missions && cacheData.missions.length > 0) {
-          // We already have AI results for these exact tabs — go straight to AI view.
-          // Pass personalMessage through so the quote is shown even on cache hit.
-          console.log('[TMC] Cache hit on load — showing AI view immediately');
-          await renderAIDashboard({
-            cachedMissions: cacheData.missions,
-            personalMessage: cacheData.personalMessage || null,
-          });
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('[TMC] Cache check failed:', err);
-    }
-  }
-
   // ── Step 3: Group open tabs by domain ────────────────────────────────────
   // This is pure JavaScript — no AI, no API calls. We extract the hostname
   // from each tab URL and group them together.
+  //
+  // Special case: "landing pages" — homepages / inboxes / feeds that you
+  // keep open out of habit. These get pulled into their own group so you
+  // can close them all at once instead of hunting across domain cards.
+  const LANDING_PAGE_PATTERNS = [
+    { hostname: 'mail.google.com',             pathPrefix: '/mail/' },
+    { hostname: 'x.com',                       pathExact: ['/home', '/zarazhangrui'] },
+    { hostname: 'www.linkedin.com',            pathExact: ['/'] },
+    { hostname: 'github.com',                  pathExact: ['/'] },
+    { hostname: 'www.youtube.com',             pathExact: ['/'] },
+    { hostname: 'bytedance.larkoffice.com',    pathPrefix: '/drive/home' },
+  ];
+
+  function isLandingPage(url) {
+    try {
+      const parsed = new URL(url);
+      return LANDING_PAGE_PATTERNS.some(p => {
+        if (parsed.hostname !== p.hostname) return false;
+        if (p.pathPrefix) return parsed.pathname.startsWith(p.pathPrefix);
+        if (p.pathExact)  return p.pathExact.includes(parsed.pathname);
+        return parsed.pathname === '/';
+      });
+    } catch { return false; }
+  }
+
   domainGroups = [];
   const groupMap = {};
+  const landingTabs = [];
+
   for (const tab of realTabs) {
     try {
+      // Check if this tab is a landing page first
+      if (isLandingPage(tab.url)) {
+        landingTabs.push(tab);
+        continue;
+      }
+
       // file:// URLs have no hostname — group them under "Local Files"
       let hostname;
       if (tab.url && tab.url.startsWith('file://')) {
@@ -1339,8 +1211,27 @@ async function renderStaticDashboard() {
       // Skip malformed URLs
     }
   }
-  // Sort groups by tab count (most tabs first)
-  domainGroups = Object.values(groupMap).sort((a, b) => b.tabs.length - a.tabs.length);
+
+  // Add landing pages as a special group at the end (if any)
+  if (landingTabs.length > 0) {
+    groupMap['__landing-pages__'] = { domain: '__landing-pages__', tabs: landingTabs };
+  }
+
+  // Sort groups: landing pages first, then domains from landing page sites
+  // (e.g. x.com, mail.google.com) so they're easy to close, then the rest
+  // sorted by tab count.
+  const landingHostnames = new Set(LANDING_PAGE_PATTERNS.map(p => p.hostname));
+  domainGroups = Object.values(groupMap).sort((a, b) => {
+    const aIsLanding = a.domain === '__landing-pages__';
+    const bIsLanding = b.domain === '__landing-pages__';
+    if (aIsLanding !== bIsLanding) return aIsLanding ? -1 : 1;
+
+    const aIsPriority = landingHostnames.has(a.domain);
+    const bIsPriority = landingHostnames.has(b.domain);
+    if (aIsPriority !== bIsPriority) return aIsPriority ? -1 : 1;
+
+    return b.tabs.length - a.tabs.length;
+  });
 
   // ── Step 4: Render domain cards ───────────────────────────────────────────
   const openTabsSection      = document.getElementById('openTabsSection');
@@ -1359,28 +1250,12 @@ async function renderStaticDashboard() {
     openTabsSection.style.display = 'none';
   }
 
-  // ── Step 5: Show "Organize with AI" button ────────────────────────────────
-  // Only show if there are actually tabs to organize
-  const aiBar = document.getElementById('aiOrganizeBar');
-  if (aiBar) {
-    aiBar.style.display = realTabs.length > 0 ? 'block' : 'none';
-  }
+  // ── Footer stats ──────────────────────────────────────────────────────────
+  const statTabs = document.getElementById('statTabs');
+  if (statTabs) statTabs.textContent = openTabs.length;
 
-  // ── Step 6: Footer stats ─────────────────────────────────────────────────
-  const statMissions = document.getElementById('statMissions');
-  const statTabs     = document.getElementById('statTabs');
-  const statStale    = document.getElementById('statStale');
-  if (statMissions) statMissions.textContent = domainGroups.length;
-  if (statTabs)     statTabs.textContent     = openTabs.length;
-  if (statStale)    statStale.textContent    = '—';
-
-  // Hide cleanup banner in static view (we don't have AI missions to compare against)
-  const cleanupBanner = document.getElementById('cleanupBanner');
-  if (cleanupBanner) cleanupBanner.style.display = 'none';
-
-  // Hide nudge banner
-  const nudgeBanner = document.getElementById('nudgeBanner');
-  if (nudgeBanner) nudgeBanner.style.display = 'none';
+  // ── Check for duplicate Tab Out tabs ────────────────────────────────────
+  checkTabOutDupes();
 
   // ── Step 9: Render the "Saved for Later" checklist column ────────────────
   await renderDeferredColumn();
@@ -1388,144 +1263,9 @@ async function renderStaticDashboard() {
 
 
 /**
- * renderAIDashboard(options)
- *
- * The AI-powered view. Called when the user clicks "Organize with AI"
- * (or instantly on load if the cache already has results for these tabs).
- *
- * options.cachedMissions — if provided, use these missions instead of calling the API.
- *                          This is how we use the cache hit path.
- *
- * What it does:
- * 1. Show loading state on the button
- * 2. Call POST /api/cluster-tabs (or use cached missions)
- * 3. Replace domain cards with AI mission cards
- * 4. Hide "Organize with AI" button
- * 5. Update footer stats
- */
-async function renderAIDashboard(options = {}) {
-  isAIView = true;
-
-  // Ensure we have fresh open tabs
-  if (openTabs.length === 0) {
-    await fetchOpenTabs();
-  }
-  const realTabs = getRealTabs();
-
-  // ── Show loading state on the AI button ───────────────────────────────────
-  const aiBar          = document.getElementById('aiOrganizeBar');
-  const aiBtnTextEl    = document.getElementById('aiOrganizeBtnText');
-  if (aiBtnTextEl) aiBtnTextEl.textContent = 'Organizing…';
-  const aiBtn = document.getElementById('aiOrganizeBtn');
-  if (aiBtn) {
-    aiBtn.disabled = true;
-    aiBtn.classList.add('loading');
-  }
-
-  openTabMissions        = []; // reset in-memory store
-  duplicateTabs          = [];
-  currentPersonalMessage = null;
-
-  // ── Fetch or reuse missions ───────────────────────────────────────────────
-  if (options.cachedMissions) {
-    // Cache hit path — no API call needed
-    openTabMissions = options.cachedMissions.map((m, i) => ({
-      ...m,
-      _stableId: m.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 40) || `mission-${i}`,
-    }));
-    // Cache hit also passes personalMessage if the server had it cached
-    currentPersonalMessage = options.personalMessage || null;
-  } else if (extensionAvailable && realTabs.length > 0) {
-    // Call DeepSeek via our server
-    try {
-      const clusterRes = await fetch('/api/cluster-tabs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabs: realTabs }),
-      });
-
-      if (clusterRes.ok) {
-        const clusterData = await clusterRes.json();
-        openTabMissions = (clusterData.missions || []).map((m, i) => ({
-          ...m,
-          _stableId: m.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 40) || `mission-${i}`,
-        }));
-        duplicateTabs          = clusterData.duplicates || [];
-        currentPersonalMessage = clusterData.personalMessage || null;
-      }
-    } catch (err) {
-      console.warn('[TMC] Could not cluster open tabs:', err);
-    }
-  }
-
-  // Build dupe URL map for the card renderer
-  const dupeUrlMap = {};
-  duplicateTabs.forEach(d => { dupeUrlMap[d.url] = d.count; });
-  window._dupeUrlMap = dupeUrlMap;
-
-  // ── Render the AI mission cards ───────────────────────────────────────────
-  const openTabsSection      = document.getElementById('openTabsSection');
-  const openTabsMissionsEl   = document.getElementById('openTabsMissions');
-  const openTabsSectionCount = document.getElementById('openTabsSectionCount');
-  const openTabsSectionTitle = document.getElementById('openTabsSectionTitle');
-
-  if (openTabMissions.length > 0 && openTabsSection) {
-    if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Right now';
-    const totalTabs = openTabMissions.reduce((s, m) => s + (m.tabs || []).length, 0);
-    openTabsSectionCount.innerHTML = `${openTabMissions.length} mission${openTabMissions.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${totalTabs} tabs</button>`;
-    openTabsMissionsEl.innerHTML = openTabMissions
-      .map((m, idx) => renderOpenTabsMissionCard(m, idx))
-      .join('');
-    openTabsSection.style.display = 'block';
-  } else if (openTabsSection) {
-    openTabsSection.style.display = 'none';
-  }
-
-  // ── Render the personal message above the mission cards ───────────────────
-  // This is the AI's witty one-liner based on the tab contents.
-  // We inject it into a dedicated element that sits just above the missions grid.
-  // If there's no message (e.g. an older cache entry), we hide it gracefully.
-  renderPersonalMessage(currentPersonalMessage);
-
-  // ── Hide static-only UI elements ─────────────────────────────────────────
-  if (aiBar) aiBar.style.display = 'none';
-
-  // ── Stale tabs ─────────────────────────────────────────────────────────────
-  const clusteredTabUrls = new Set(
-    openTabMissions.flatMap(m => (m.tabs || []).map(t => t.url))
-  );
-  const staleTabs = realTabs.filter(t => !clusteredTabUrls.has(t.url));
-
-  const cleanupBanner = document.getElementById('cleanupBanner');
-  if (staleTabs.length > 0 && cleanupBanner) {
-    document.getElementById('staleTabCount').textContent =
-      `${staleTabs.length} stale tab${staleTabs.length !== 1 ? 's' : ''}`;
-    cleanupBanner.style.display = 'flex';
-  } else if (cleanupBanner) {
-    cleanupBanner.style.display = 'none';
-  }
-
-  // Hide nudge banner
-  const nudgeBanner = document.getElementById('nudgeBanner');
-  if (nudgeBanner) nudgeBanner.style.display = 'none';
-
-  // ── Footer stats ───────────────────────────────────────────────────────────
-  const statMissions = document.getElementById('statMissions');
-  const statTabs     = document.getElementById('statTabs');
-  const statStale    = document.getElementById('statStale');
-  if (statMissions) statMissions.textContent = openTabMissions.length;
-  if (statTabs)     statTabs.textContent     = openTabs.length;
-  if (statStale)    statStale.textContent    = staleTabs.length;
-
-  // Render the "Saved for Later" checklist column
-  await renderDeferredColumn();
-}
-
-
-/**
  * renderDashboard()
  *
- * Legacy entry point — now just calls renderStaticDashboard().
+ * Entry point — just calls renderStaticDashboard().
  */
 async function renderDashboard() {
   await renderStaticDashboard();
@@ -1548,27 +1288,38 @@ document.addEventListener('click', async (e) => {
   // element with a data-action attribute
   const actionEl = e.target.closest('[data-action]');
 
-  // --- "Organize with AI" button ---
-  if (e.target.closest('#aiOrganizeBtn')) {
-    e.preventDefault();
-    await renderAIDashboard();
-    return;
-  }
-
-  // --- Close all stale tabs button (in the cleanup banner) ---
-  if (e.target.closest('#closeAllStaleBtn')) {
-    e.preventDefault();
-    await handleCloseAllStale();
-    return;
-  }
-
   if (!actionEl) return; // click wasn't on an action button
 
   const action    = actionEl.dataset.action;
   const missionId = actionEl.dataset.missionId;
 
+  // --- Close duplicate Tab Out tabs ---
+  if (action === 'close-tabout-dupes') {
+    await sendToExtension('closeTabOutDupes');
+    await fetchOpenTabs();
+    playCloseSound();
+    const banner = document.getElementById('tabOutDupeBanner');
+    if (banner) {
+      banner.style.transition = 'opacity 0.4s';
+      banner.style.opacity = '0';
+      setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
+    }
+    showToast('Closed extra Tab Out tabs');
+    return;
+  }
+
   // Find the card element so we can animate it
   const card = actionEl.closest('.mission-card');
+
+  // ---- expand-chips: show the hidden tabs in a card ----
+  if (action === 'expand-chips') {
+    const overflowContainer = actionEl.parentElement.querySelector('.page-chips-overflow');
+    if (overflowContainer) {
+      overflowContainer.style.display = 'contents';
+      actionEl.remove();
+    }
+    return;
+  }
 
   // ---- focus-tab: switch to a specific open tab ----
   if (action === 'focus-tab') {
@@ -1637,92 +1388,6 @@ document.addEventListener('click', async (e) => {
 
     showToast('Saved for later');
     // Refresh the deferred column to show the new item
-    await renderDeferredColumn();
-    return;
-  }
-
-  // ---- defer-mission-tabs: save all tabs in an AI mission for later ----
-  if (action === 'defer-mission-tabs') {
-    const stableId = actionEl.dataset.openMissionId;
-    const mission = openTabMissions.find(m => m._stableId === stableId);
-    if (!mission) return;
-
-    const tabs = (mission.tabs || []).map(t => ({
-      url: t.url,
-      title: t.title || t.url,
-      source_mission: mission.name || null,
-    }));
-
-    try {
-      await fetch('/api/defer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabs }),
-      });
-    } catch (err) {
-      console.error('[TMC] Failed to defer mission tabs:', err);
-      showToast('Failed to save tabs');
-      return;
-    }
-
-    // Close all tabs in the mission
-    const urls = tabs.map(t => t.url);
-    await closeTabsByUrls(urls);
-
-    // Animate the card out
-    if (card) {
-      playCloseSound();
-      animateCardOut(card);
-    }
-
-    const idx = openTabMissions.indexOf(mission);
-    if (idx !== -1) openTabMissions.splice(idx, 1);
-
-    showToast(`Saved ${tabs.length} tab${tabs.length !== 1 ? 's' : ''} for later`);
-    await renderDeferredColumn();
-    return;
-  }
-
-  // ---- defer-domain-tabs: save all tabs in a domain group for later ----
-  if (action === 'defer-domain-tabs') {
-    const domainId = actionEl.dataset.domainId;
-    const group = domainGroups.find(g => {
-      const id = 'domain-' + g.domain.replace(/[^a-z0-9]/g, '-');
-      return id === domainId;
-    });
-    if (!group) return;
-
-    const tabs = (group.tabs || []).map(t => ({
-      url: t.url,
-      title: t.title || t.url,
-      source_mission: group.domain || null,
-    }));
-
-    try {
-      await fetch('/api/defer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tabs }),
-      });
-    } catch (err) {
-      console.error('[TMC] Failed to defer domain tabs:', err);
-      showToast('Failed to save tabs');
-      return;
-    }
-
-    // Close all tabs in the domain group
-    const urls = tabs.map(t => t.url);
-    await closeTabsByUrls(urls);
-
-    if (card) {
-      playCloseSound();
-      animateCardOut(card);
-    }
-
-    const idx = domainGroups.indexOf(group);
-    if (idx !== -1) domainGroups.splice(idx, 1);
-
-    showToast(`Saved ${tabs.length} tab${tabs.length !== 1 ? 's' : ''} from ${friendlyDomain(group.domain)}`);
     await renderDeferredColumn();
     return;
   }
@@ -1809,7 +1474,8 @@ document.addEventListener('click', async (e) => {
     const idx = domainGroups.indexOf(group);
     if (idx !== -1) domainGroups.splice(idx, 1);
 
-    showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${friendlyDomain(group.domain)}`);
+    const groupLabel = group.domain === '__landing-pages__' ? 'Landing pages' : friendlyDomain(group.domain);
+    showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
 
     // Update footer tab count
     const statTabs = document.getElementById('statTabs');
@@ -1858,34 +1524,8 @@ document.addEventListener('click', async (e) => {
       animateCardOut(c);
     });
 
-    openTabMissions = [];
     showToast('All tabs closed. Fresh start.');
     return;
-  }
-
-  // ---- close-open-tabs: close all tabs for an open-tab-clustered mission ----
-  // These missions use a stable ID (based on name) so closing one doesn't
-  // break buttons on others.
-  if (action === 'close-open-tabs') {
-    const stableId = actionEl.dataset.openMissionId;
-    const mission = openTabMissions.find(m => m._stableId === stableId);
-    if (!mission) return;
-
-    const urls = (mission.tabs || []).map(t => t.url);
-    await closeTabsByUrls(urls);
-
-    // Animate the card out — the mission is "done" once all tabs are closed
-    if (card) {
-      playCloseSound();
-      animateCardOut(card);
-    }
-
-    // Remove from in-memory store so stale count stays accurate
-    const idx = openTabMissions.indexOf(mission);
-    if (idx !== -1) openTabMissions.splice(idx, 1);
-
-    await updateStaleCount();
-    showToast(`Closed tabs for "${mission.name}"`);
   }
 
   // ---- archive: close tabs + mark mission as archived, then remove card ----
@@ -1910,7 +1550,7 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast(`Archived "${mission.name}"`);
-    await updateStaleCount();
+
   }
 
   // ---- dismiss: close tabs (if any), mark as dismissed, remove card ----
@@ -1942,7 +1582,7 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast(`Let go of "${mission.name}"`);
-    await updateStaleCount();
+
   }
 
   // ---- focus: bring the mission's tabs to the front ----
@@ -1974,7 +1614,7 @@ document.addEventListener('click', async (e) => {
       animateCardOut(card);
     }
     showToast(`Closed ${tabsToClose.length} tab${tabsToClose.length !== 1 ? 's' : ''} from ${domain}`);
-    await updateStaleCount();
+
   }
 });
 
@@ -2033,49 +1673,10 @@ document.addEventListener('input', async (e) => {
  * With the new architecture, "stale" means tabs that somehow slipped
  * through the AI clustering (shouldn't happen, but could with edge cases).
  */
-async function handleCloseAllStale() {
-  const realTabs = getRealTabs();
-
-  // Stale tabs = open real tabs not in any clustered mission (AI view only).
-  // In static view there's no AI grouping, so we fall back to no-op.
-  const clusteredTabUrls = new Set(
-    openTabMissions.flatMap(m => (m.tabs || []).map(t => t.url))
-  );
-
-  const staleUrls = realTabs
-    .filter(t => !clusteredTabUrls.has(t.url))
-    .map(t => t.url);
-
-  if (staleUrls.length > 0) {
-    await closeTabsByUrls(staleUrls);
-  }
-
-  playCloseSound();
-
-  // Hide the cleanup banner
-  const banner = document.getElementById('cleanupBanner');
-  if (banner) {
-    banner.style.transition = 'opacity 0.4s';
-    banner.style.opacity = '0';
-    setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
-  }
-
-  // Update footer stats
-  const statStale = document.getElementById('statStale');
-  const statTabs  = document.getElementById('statTabs');
-  if (statStale) statStale.textContent = '0';
-  if (statTabs)  statTabs.textContent  = openTabs.length;
-
-  showToast('Closed all stale tabs. Breathing room restored.');
-}
-
 /**
  * fetchMissionById(missionId)
  *
  * Fetches a single mission object by ID from the server.
- * We need this when handling button clicks, so we have the mission's
- * page URLs and name ready.
- *
  * Returns null if the fetch fails.
  */
 async function fetchMissionById(missionId) {
@@ -2086,45 +1687,6 @@ async function fetchMissionById(missionId) {
     return missions.find(m => String(m.id) === String(missionId)) || null;
   } catch {
     return null;
-  }
-}
-
-/**
- * updateStaleCount()
- *
- * Recalculates stale tabs after a close action and updates the footer + banner.
- * In the new architecture, stale = open real tabs not covered by any clustered mission.
- */
-async function updateStaleCount() {
-  await fetchOpenTabs(); // refresh our live tab list first
-
-  const realTabs = getRealTabs();
-
-  // Recalculate which tabs are "stale" (not in any open-tab mission)
-  const clusteredTabUrls = new Set(
-    openTabMissions.flatMap(m => (m.tabs || []).map(t => t.url))
-  );
-
-  const staleTabs = realTabs.filter(t => !clusteredTabUrls.has(t.url));
-
-  // Update footer numbers
-  const statStale = document.getElementById('statStale');
-  const statTabs  = document.getElementById('statTabs');
-  if (statStale) statStale.textContent = staleTabs.length;
-  if (statTabs)  statTabs.textContent  = openTabs.length;
-
-  // Update or hide the cleanup banner
-  const staleTabCountEl = document.getElementById('staleTabCount');
-  const cleanupBanner   = document.getElementById('cleanupBanner');
-  if (staleTabs.length > 0) {
-    if (staleTabCountEl) staleTabCountEl.textContent = `${staleTabs.length} stale tab${staleTabs.length !== 1 ? 's' : ''}`;
-    if (cleanupBanner)   cleanupBanner.style.display = 'flex';
-  } else {
-    if (cleanupBanner) {
-      cleanupBanner.style.transition = 'opacity 0.4s';
-      cleanupBanner.style.opacity = '0';
-      setTimeout(() => { cleanupBanner.style.display = 'none'; cleanupBanner.style.opacity = '1'; }, 400);
-    }
   }
 }
 

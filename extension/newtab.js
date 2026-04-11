@@ -73,6 +73,10 @@ window.addEventListener('message', async (event) => {
       // Close duplicate tabs — either all copies or keep one of each
       response = await handleCloseDuplicates(msg.urls, msg.keepOne);
 
+    } else if (action === 'closeTabOutDupes') {
+      // Close extra Tab Out new-tab pages, keeping only the current one
+      response = await handleCloseTabOutDupes();
+
     } else {
       response = { error: `Unknown action: ${action}` };
     }
@@ -101,12 +105,19 @@ window.addEventListener('message', async (event) => {
  */
 async function handleGetTabs() {
   const tabs = await chrome.tabs.query({});
+  const extensionId = chrome.runtime.id;
+  const newtabUrl = `chrome-extension://${extensionId}/newtab.html`;
+
   const simpleTabs = tabs.map(tab => ({
     id:       tab.id,
     url:      tab.url,
     title:    tab.title,
     windowId: tab.windowId,
     active:   tab.active,
+    // Flag Tab Out's own new-tab pages so the dashboard can detect them.
+    // Chrome may report the URL as chrome://newtab/ or the extension URL —
+    // checking both ensures we catch them regardless.
+    isTabOut: tab.url === newtabUrl || tab.url === 'chrome://newtab/',
   }));
   return { tabs: simpleTabs };
 }
@@ -209,20 +220,26 @@ async function handleFocusSingleTab(url) {
   if (!url) return { error: 'No URL provided' };
 
   const allTabs = await chrome.tabs.query({});
+  const currentWindow = await chrome.windows.getCurrent();
 
-  // Try exact URL match first, then fall back to hostname match
-  let match = allTabs.find(t => t.url === url);
-  if (!match) {
+  // Try exact URL match first, then fall back to hostname match.
+  // Prefer tabs in OTHER windows — if the user is clicking a chip, they
+  // probably want to jump to that tab, not the one already behind this page.
+  let matches = allTabs.filter(t => t.url === url);
+  if (matches.length === 0) {
     try {
       const targetHost = new URL(url).hostname;
-      match = allTabs.find(t => {
+      matches = allTabs.filter(t => {
         try { return new URL(t.url).hostname === targetHost; }
         catch { return false; }
       });
     } catch {}
   }
 
-  if (!match) return { error: 'Tab not found' };
+  if (matches.length === 0) return { error: 'Tab not found' };
+
+  // Prefer a match in a different window so it actually switches windows
+  const match = matches.find(t => t.windowId !== currentWindow.id) || matches[0];
 
   await chrome.tabs.update(match.id, { active: true });
   await chrome.windows.update(match.windowId, { focused: true });
@@ -260,4 +277,37 @@ async function handleCloseDuplicates(urls = [], keepOne = true) {
   }
 
   return { closedCount: tabIdsToClose.length };
+}
+
+/**
+ * closeTabOutDupes — Closes all duplicate Tab Out new-tab pages except the
+ * one the user is currently looking at. Tab Out tabs show up as
+ * chrome-extension://XXXXX/newtab.html in chrome.tabs — we find all of them
+ * and close every one except the active tab in the current window.
+ */
+async function handleCloseTabOutDupes() {
+  const allTabs = await chrome.tabs.query({});
+
+  // Find all tabs that are Tab Out new-tab pages.
+  // Chrome may report the URL as chrome://newtab/ or the full extension URL.
+  const extensionId = chrome.runtime.id;
+  const newtabUrl = `chrome-extension://${extensionId}/newtab.html`;
+
+  const tabOutTabs = allTabs.filter(t =>
+    t.url === newtabUrl || t.url === 'chrome://newtab/'
+  );
+
+  if (tabOutTabs.length <= 1) {
+    return { closedCount: 0 };
+  }
+
+  // Keep the active one in the focused window; if none is active, keep the first
+  const keep = tabOutTabs.find(t => t.active) || tabOutTabs[0];
+  const toClose = tabOutTabs.filter(t => t.id !== keep.id).map(t => t.id);
+
+  if (toClose.length > 0) {
+    await chrome.tabs.remove(toClose);
+  }
+
+  return { closedCount: toClose.length };
 }

@@ -23,6 +23,18 @@ const { startUpdateChecker } = require('./updater');
 
 const app = express();
 
+// Allow requests from the Chrome extension.
+// The extension's background script runs on the "chrome-extension://..." origin,
+// which is different from "http://localhost:3456". Without these headers, Chrome
+// blocks those cross-origin requests (CORS error).
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // Parse JSON request bodies (for POST endpoints)
 app.use(express.json());
 

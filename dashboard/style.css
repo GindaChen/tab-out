@@ -1030,12 +1030,14 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   min-width: 0;
 }
 
-/* Saved for later column — fixed width on the right */
+/* Saved for later column — fixed width on the right, scrolls independently */
 .deferred-column {
   width: 300px;
   flex-shrink: 0;
   position: sticky;
   top: 32px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
 }
 
 /* On narrow screens, stack vertically */
