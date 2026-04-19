@@ -91,3 +91,56 @@ chrome.tabs.onUpdated.addListener(() => {
 
 // Run once immediately when the service worker first loads
 updateBadge();
+
+
+// ─── Keyboard shortcut: open or focus Tab Out ─────────────────────────────────
+
+/**
+ * openOrFocusTabOut()
+ *
+ * Implements the "open-tab-out" command triggered by the keyboard shortcut.
+ *
+ * Logic:
+ *   1. Look for any already-open Tab Out tab (chrome-extension://.../index.html).
+ *   2. If one exists → activate it and bring its window to the front.
+ *   3. If none exists → open a new Tab Out tab in the current window.
+ *
+ * This mirrors how browsers handle "switch to existing tab" for homepage tabs.
+ */
+async function openOrFocusTabOut() {
+  try {
+    const extensionId  = chrome.runtime.id;
+    const tabOutUrl    = `chrome-extension://${extensionId}/index.html`;
+
+    // Find all open Tab Out tabs across all windows
+    const allTabs      = await chrome.tabs.query({});
+    const tabOutTabs   = allTabs.filter(t => t.url === tabOutUrl || t.url === 'chrome://newtab/');
+
+    if (tabOutTabs.length > 0) {
+      // Prefer a tab in the currently focused window
+      const currentWindow = await chrome.windows.getCurrent();
+      const match =
+        tabOutTabs.find(t => t.windowId === currentWindow.id) ||
+        tabOutTabs[0];
+
+      await chrome.tabs.update(match.id, { active: true });
+      await chrome.windows.update(match.windowId, { focused: true });
+    } else {
+      // No Tab Out tab open — open a fresh one
+      await chrome.tabs.create({ url: tabOutUrl });
+    }
+  } catch (err) {
+    console.error('[tab-out] Failed to open/focus Tab Out:', err);
+  }
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'open-tab-out') {
+    openOrFocusTabOut();
+  }
+});
+
+// Clicking the toolbar icon also opens/focuses Tab Out (same logic)
+chrome.action.onClicked.addListener(() => {
+  openOrFocusTabOut();
+});
