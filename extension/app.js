@@ -1598,3 +1598,39 @@ document.addEventListener('input', async (e) => {
    INITIALIZE
    ---------------------------------------------------------------- */
 renderDashboard();
+
+
+/* ----------------------------------------------------------------
+   KEYBOARD SHORTCUT HINT
+   Renders a small hint in the footer showing the shortcut to jump
+   back to this dashboard from any other tab.
+   ---------------------------------------------------------------- */
+
+/**
+ * renderShortcutHint()
+ *
+ * Detects whether the user is on macOS (navigator.platform) and injects
+ * the correct key chord into #shortcutHint.
+ *   macOS:  ⌘ ⇧ .
+ *   Other:  Alt + T
+ *
+ * Chrome extensions can't inspect the *actual* registered shortcut at
+ * runtime (chrome.commands.getAll() is async and service-worker only),
+ * so we mirror the manifest's "suggested_key" values here.
+ */
+function renderShortcutHint() {
+  const el = document.getElementById('shortcutHint');
+  if (!el) return;
+
+  const isMac = navigator.platform.toLowerCase().includes('mac') ||
+                navigator.userAgentData?.platform?.toLowerCase().includes('mac');
+
+  if (isMac) {
+    el.innerHTML = `Jump back here: <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>`;
+  } else {
+    el.innerHTML = `Jump back here: <kbd>Alt</kbd>+<kbd>T</kbd>`;
+  }
+}
+
+renderShortcutHint();
+
