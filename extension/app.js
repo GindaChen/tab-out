@@ -1435,6 +1435,164 @@ document.addEventListener('input', (e) => {
 
 
 /* ----------------------------------------------------------------
+   MULTI-SELECT — pick tabs across domain cards and split/move them
+   ---------------------------------------------------------------- */
+
+let selectMode        = false;
+const selectedTabUrls = new Set();
+
+function setSelectMode(on) {
+  selectMode = !!on;
+  document.body.classList.toggle('select-mode', selectMode);
+  const toggleBtn = document.getElementById('selectToggle');
+  const actions   = document.getElementById('selectToolbarActions');
+  if (toggleBtn) {
+    toggleBtn.setAttribute('aria-pressed', selectMode ? 'true' : 'false');
+    toggleBtn.textContent = selectMode ? 'Exit select' : 'Select tabs';
+  }
+  if (actions) actions.style.display = selectMode ? 'flex' : 'none';
+  if (!selectMode) clearSelectedTabs();
+  else renderMoveToWindowOptions();
+}
+
+function toggleTabSelected(url, chipEl) {
+  if (selectedTabUrls.has(url)) {
+    selectedTabUrls.delete(url);
+    chipEl?.classList.remove('selected');
+  } else {
+    selectedTabUrls.add(url);
+    chipEl?.classList.add('selected');
+  }
+  updateSelectCount();
+  renderMoveToWindowOptions();
+}
+
+function clearSelectedTabs() {
+  selectedTabUrls.clear();
+  document.querySelectorAll('.page-chip.selected').forEach(c => c.classList.remove('selected'));
+  updateSelectCount();
+  renderMoveToWindowOptions();
+}
+
+function updateSelectCount() {
+  const el = document.getElementById('selectCount');
+  if (el) el.textContent = `${selectedTabUrls.size} selected`;
+}
+
+function renderMoveToWindowOptions() {
+  const sel = document.getElementById('moveToWindow');
+  if (!sel) return;
+  const windowIds = [...new Set(openTabs.map(t => t.windowId))];
+
+  // Windows that contain at least one selected tab — exclude from the
+  // "move to existing" list (moving there would be a no-op for some tabs).
+  const selectedWindowIds = new Set(
+    openTabs.filter(t => selectedTabUrls.has(t.url)).map(t => t.windowId)
+  );
+  const candidates = windowIds.filter(id => selectedTabUrls.size === 0
+    ? true
+    : !(selectedWindowIds.size === 1 && selectedWindowIds.has(id)));
+
+  sel.innerHTML = '<option value="">Move to window…</option>' +
+    candidates.map(id => {
+      const count = openTabs.filter(t => t.windowId === id).length;
+      const name  = windowNameMap[id] || `Window ${id}`;
+      return `<option value="${id}">${name} (${count} tab${count !== 1 ? 's' : ''})</option>`;
+    }).join('');
+  sel.value = '';
+  sel.disabled = selectedTabUrls.size === 0 || candidates.length === 0;
+}
+
+// Map selected URLs to actual chrome tab IDs (first match per URL).
+function selectedTabIds() {
+  const ids   = [];
+  const seen  = new Set();
+  for (const t of openTabs) {
+    if (!selectedTabUrls.has(t.url)) continue;
+    if (seen.has(t.url)) continue;
+    seen.add(t.url);
+    ids.push(t.id);
+  }
+  return ids;
+}
+
+async function splitSelectedToNewWindow() {
+  const ids = selectedTabIds();
+  if (ids.length === 0) return;
+  const [firstId, ...rest] = ids;
+  const win = await chrome.windows.create({ tabId: firstId });
+  if (rest.length > 0) {
+    await chrome.tabs.move(rest, { windowId: win.id, index: -1 });
+  }
+  showToast(`Split ${ids.length} tab${ids.length !== 1 ? 's' : ''} into new window`);
+  clearSelectedTabs();
+  setSelectMode(false);
+  await fetchOpenTabs();
+  await renderDashboard();
+}
+
+async function moveSelectedToWindow(windowId) {
+  const ids = selectedTabIds();
+  if (ids.length === 0 || !windowId) return;
+  await chrome.tabs.move(ids, { windowId: Number(windowId), index: -1 });
+  showToast(`Moved ${ids.length} tab${ids.length !== 1 ? 's' : ''}`);
+  clearSelectedTabs();
+  setSelectMode(false);
+  await fetchOpenTabs();
+  await renderDashboard();
+}
+
+// Wiring ---------------------------------------------------------------
+
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('#selectToggle')) {
+    setSelectMode(!selectMode);
+    return;
+  }
+  if (e.target.closest('#selectClear')) {
+    clearSelectedTabs();
+    return;
+  }
+  if (e.target.closest('#selectAll')) {
+    document.querySelectorAll('#openTabsMissions .page-chip[data-action="focus-tab"]').forEach(chip => {
+      if (chip.offsetParent === null) return; // skip hidden (e.g. filtered out)
+      const url = chip.dataset.tabUrl;
+      if (!url) return;
+      selectedTabUrls.add(url);
+      chip.classList.add('selected');
+    });
+    updateSelectCount();
+    renderMoveToWindowOptions();
+    return;
+  }
+  if (e.target.closest('#splitNewWindow')) {
+    if (selectedTabUrls.size === 0) { showToast('Select tabs first'); return; }
+    await splitSelectedToNewWindow();
+    return;
+  }
+
+  // In select mode, clicking a chip toggles selection instead of focusing/closing.
+  if (selectMode) {
+    const chip = e.target.closest('.page-chip[data-action="focus-tab"]');
+    if (chip) {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = chip.dataset.tabUrl;
+      if (url) toggleTabSelected(url, chip);
+      return;
+    }
+  }
+});
+
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'moveToWindow') return;
+  const windowId = e.target.value;
+  if (!windowId) return;
+  await moveSelectedToWindow(windowId);
+});
+
+
+/* ----------------------------------------------------------------
    EVENT HANDLERS — using event delegation
 
    One listener on document handles ALL button clicks.
@@ -1446,6 +1604,10 @@ document.addEventListener('click', async (e) => {
   // Walk up the DOM to find the nearest element with data-action
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
+
+  // In multi-select mode, chip clicks toggle selection only — bail out
+  // before firing per-chip actions (focus-tab, close-single-tab, etc).
+  if (selectMode && e.target.closest('#openTabsMissions .page-chip')) return;
 
   const action = actionEl.dataset.action;
 

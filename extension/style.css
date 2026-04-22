@@ -1251,6 +1251,71 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   padding: 4px 2px 12px;
 }
 
+/* ---- Multi-select toolbar ---- */
+.select-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.select-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.select-toolbar .select-count {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.select-toolbar #selectToggle[aria-pressed="true"] {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: #fff;
+}
+
+/* Selection mode chip affordance */
+.select-mode .page-chip.clickable {
+  cursor: pointer;
+  position: relative;
+}
+
+.select-mode .page-chip.clickable::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--warm-gray);
+  border-radius: 3px;
+  margin-right: 6px;
+  background: var(--card-bg);
+  flex-shrink: 0;
+}
+
+.select-mode .page-chip.selected::before {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12l5 5L20 7'/></svg>");
+  background-size: 10px 10px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.select-mode .page-chip.selected {
+  outline: 1.5px solid var(--accent-amber);
+  outline-offset: 1px;
+}
+
+/* Hide per-chip action buttons in select mode to avoid accidental clicks */
+.select-mode .page-chip .chip-actions {
+  display: none;
+}
+
 .archive-search:focus {
   border-color: var(--accent-amber);
 }

@@ -68,6 +68,20 @@
       </div>
       <input type="text" class="tabs-search" id="tabsSearch" placeholder="Search open tabs..." autocomplete="off">
       <div class="tabs-search-empty" id="tabsSearchEmpty" style="display:none">No tabs match your search.</div>
+
+      <div class="select-toolbar" id="selectToolbar">
+        <button class="action-btn" id="selectToggle" aria-pressed="false">Select tabs</button>
+        <div class="select-toolbar-actions" id="selectToolbarActions" style="display:none">
+          <span class="select-count" id="selectCount">0 selected</span>
+          <button class="action-btn" id="selectAll" title="Select all visible tabs">Select all</button>
+          <button class="action-btn primary" id="splitNewWindow">Split to new window</button>
+          <select class="deferred-sort" id="moveToWindow" title="Move to existing window">
+            <option value="">Move to window…</option>
+          </select>
+          <button class="action-btn" id="selectClear">Clear</button>
+        </div>
+      </div>
+
       <div class="missions" id="openTabsMissions"></div>
     </div>
 
