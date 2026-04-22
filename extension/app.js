@@ -1272,7 +1272,59 @@ async function renderStaticDashboard() {
 
 async function renderDashboard() {
   await renderStaticDashboard();
+  applyTabsFilter();
 }
+
+/* ----------------------------------------------------------------
+   TABS SEARCH — filter open-tab domain cards and chips by query
+   ---------------------------------------------------------------- */
+
+function applyTabsFilter() {
+  const input = document.getElementById('tabsSearch');
+  if (!input) return;
+  const q = input.value.trim().toLowerCase();
+  const cards = document.querySelectorAll('#openTabsMissions .mission-card');
+  let visibleCards = 0;
+
+  cards.forEach(card => {
+    const domainName = (card.querySelector('.mission-name')?.textContent || '').toLowerCase();
+    const chips = card.querySelectorAll('.page-chip');
+    let anyChipVisible = false;
+
+    if (!q) {
+      chips.forEach(chip => { chip.style.display = ''; });
+      card.style.display = '';
+      visibleCards++;
+      return;
+    }
+
+    const domainMatches = domainName.includes(q);
+
+    chips.forEach(chip => {
+      const title = (chip.getAttribute('title') || '').toLowerCase();
+      const url   = (chip.getAttribute('data-tab-url') || '').toLowerCase();
+      const text  = (chip.querySelector('.chip-text')?.textContent || '').toLowerCase();
+      const match = domainMatches || title.includes(q) || url.includes(q) || text.includes(q);
+      chip.style.display = match ? '' : 'none';
+      if (match) anyChipVisible = true;
+    });
+
+    if (anyChipVisible) {
+      card.style.display = '';
+      visibleCards++;
+    } else {
+      card.style.display = 'none';
+    }
+  });
+
+  const emptyEl = document.getElementById('tabsSearchEmpty');
+  if (emptyEl) emptyEl.style.display = (q && visibleCards === 0) ? 'block' : 'none';
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'tabsSearch') return;
+  applyTabsFilter();
+});
 
 
 /* ----------------------------------------------------------------

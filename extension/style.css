@@ -1152,7 +1152,8 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   padding-top: 12px;
 }
 
-.archive-search {
+.archive-search,
+.tabs-search {
   font-family: 'DM Sans', sans-serif;
   font-size: 12px;
   width: 100%;
@@ -1164,6 +1165,26 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   outline: none;
   transition: border-color 0.2s;
   margin-bottom: 12px;
+}
+
+.tabs-search {
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+
+.tabs-search:focus {
+  border-color: var(--accent-amber);
+}
+
+.tabs-search::placeholder {
+  color: var(--muted);
+}
+
+.tabs-search-empty {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+  padding: 4px 2px 12px;
 }
 
 .archive-search:focus {
