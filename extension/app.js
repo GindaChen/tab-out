@@ -957,6 +957,10 @@ function renderDomainCard(group) {
     <button class="action-btn close-tabs" data-action="close-domain-tabs" data-domain-id="${stableId}">
       ${ICONS.close}
       Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+    </button>
+    <button class="action-btn save-tabs" data-action="save-domain-for-later" data-domain-id="${stableId}">
+      ${ICONS.archive}
+      Save for later
     </button>`;
 
   if (hasDupes) {
@@ -998,14 +1002,91 @@ function renderDomainCard(group) {
  * "Saved for Later" checklist column. Shows active items as a checklist
  * and completed items in a collapsible archive.
  */
+function getDeferredDomain(item) {
+  try { return new URL(item.url).hostname.replace(/^www\./, '').toLowerCase(); }
+  catch { return ''; }
+}
+
+let deferredGroupByDomain = (() => {
+  try { return localStorage.getItem('tabout.deferred.groupByDomain') === '1'; }
+  catch { return false; }
+})();
+
+function setDeferredGroupByDomain(on) {
+  deferredGroupByDomain = !!on;
+  try { localStorage.setItem('tabout.deferred.groupByDomain', deferredGroupByDomain ? '1' : '0'); } catch {}
+  const btn = document.getElementById('deferredGroupToggle');
+  if (btn) btn.setAttribute('aria-pressed', deferredGroupByDomain ? 'true' : 'false');
+}
+
+function groupDeferredByDomain(items, sortKey) {
+  const byDomain = new Map();
+  for (const it of items) {
+    const d = getDeferredDomain(it) || '(other)';
+    if (!byDomain.has(d)) byDomain.set(d, []);
+    byDomain.get(d).push(it);
+  }
+  const groups = [];
+  for (const [domain, arr] of byDomain) {
+    groups.push({ domain, items: sortDeferredItems(arr, sortKey) });
+  }
+  // Sort groups: by domain name when sortKey is domain/title; otherwise by most-recent item first (or oldest)
+  if (sortKey === 'domain' || sortKey === 'title') {
+    groups.sort((a, b) => a.domain.localeCompare(b.domain));
+  } else if (sortKey === 'oldest') {
+    groups.sort((a, b) => new Date(a.items[0].savedAt) - new Date(b.items[0].savedAt));
+  } else {
+    groups.sort((a, b) => new Date(b.items[0].savedAt) - new Date(a.items[0].savedAt));
+  }
+  return groups;
+}
+
+function renderDeferredGroup(group) {
+  const faviconUrl = group.domain && group.domain !== '(other)'
+    ? `https://www.google.com/s2/favicons?domain=${group.domain}&sz=16`
+    : '';
+  const itemsHtml = group.items.map(it => renderDeferredItem(it)).join('');
+  return `
+    <div class="deferred-group">
+      <div class="deferred-group-header">
+        ${faviconUrl ? `<img class="deferred-group-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
+        <span class="deferred-group-name">${group.domain}</span>
+        <span class="deferred-group-count">${group.items.length}</span>
+      </div>
+      <div class="deferred-list">${itemsHtml}</div>
+    </div>`;
+}
+
+function sortDeferredItems(items, sortKey) {
+  const arr = items.slice();
+  switch (sortKey) {
+    case 'oldest':
+      arr.sort((a, b) => new Date(a.savedAt) - new Date(b.savedAt));
+      break;
+    case 'title':
+      arr.sort((a, b) => (a.title || a.url || '').localeCompare(b.title || b.url || '', undefined, { sensitivity: 'base' }));
+      break;
+    case 'domain':
+      arr.sort((a, b) => getDeferredDomain(a).localeCompare(getDeferredDomain(b)));
+      break;
+    case 'recent':
+    default:
+      arr.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+  }
+  return arr;
+}
+
 async function renderDeferredColumn() {
   const column         = document.getElementById('deferredColumn');
   const list           = document.getElementById('deferredList');
   const empty          = document.getElementById('deferredEmpty');
+  const filterEmpty    = document.getElementById('deferredFilterEmpty');
   const countEl        = document.getElementById('deferredCount');
   const archiveEl      = document.getElementById('deferredArchive');
   const archiveCountEl = document.getElementById('archiveCount');
   const archiveList    = document.getElementById('archiveList');
+  const filterInput    = document.getElementById('deferredFilter');
+  const sortSelect     = document.getElementById('deferredSort');
 
   if (!column) return;
 
@@ -1020,16 +1101,42 @@ async function renderDeferredColumn() {
 
     column.style.display = 'block';
 
-    // Render active checklist items
+    // Render active checklist items (with filter + sort applied)
+    const q        = (filterInput?.value || '').trim().toLowerCase();
+    const sortKey  = sortSelect?.value || 'recent';
+    const filtered = q
+      ? active.filter(it =>
+          (it.title || '').toLowerCase().includes(q) ||
+          (it.url   || '').toLowerCase().includes(q) ||
+          getDeferredDomain(it).includes(q))
+      : active;
+    const visible = sortDeferredItems(filtered, sortKey);
+
     if (active.length > 0) {
-      countEl.textContent = `${active.length} item${active.length !== 1 ? 's' : ''}`;
-      list.innerHTML = active.map(item => renderDeferredItem(item)).join('');
-      list.style.display = 'block';
-      empty.style.display = 'none';
+      const shown = visible.length;
+      countEl.textContent = q
+        ? `${shown} of ${active.length}`
+        : `${active.length} item${active.length !== 1 ? 's' : ''}`;
+      if (shown > 0) {
+        if (deferredGroupByDomain) {
+          const groups = groupDeferredByDomain(visible, sortKey);
+          list.innerHTML = groups.map(g => renderDeferredGroup(g)).join('');
+        } else {
+          list.innerHTML = visible.map(item => renderDeferredItem(item)).join('');
+        }
+        list.style.display = 'block';
+        empty.style.display = 'none';
+        if (filterEmpty) filterEmpty.style.display = 'none';
+      } else {
+        list.style.display = 'none';
+        empty.style.display = 'none';
+        if (filterEmpty) filterEmpty.style.display = 'block';
+      }
     } else {
       list.style.display = 'none';
       countEl.textContent = '';
       empty.style.display = 'block';
+      if (filterEmpty) filterEmpty.style.display = 'none';
     }
 
     // Render archive section
@@ -1250,7 +1357,7 @@ async function renderStaticDashboard() {
       ? ` <button class="action-btn${showWindowLabels ? ' primary' : ''}" data-action="toggle-window-labels" style="font-size:11px;padding:3px 10px;">
           ${ICONS.tabs}
           ${showWindowLabels ? 'Hide' : 'Show'} windows</button>` : '';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${winCount > 1 ? ` &middot; ${winCount} windows` : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>${mergeBtn}${showWinToggle}`;
+    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${winCount > 1 ? ` &middot; ${winCount} windows` : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button> <button class="action-btn save-tabs" data-action="save-all-for-later" style="font-size:11px;padding:3px 10px;">${ICONS.archive} Save for later</button>${mergeBtn}${showWinToggle}`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1530,6 +1637,55 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // ---- Save all tabs in a domain group for later ----
+  if (action === 'save-domain-for-later') {
+    const domainId = actionEl.dataset.domainId;
+    const group    = domainGroups.find(g => {
+      return 'domain-' + g.domain.replace(/[^a-z0-9]/g, '-') === domainId;
+    });
+    if (!group) return;
+
+    const savable = group.tabs.filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'));
+    if (savable.length === 0) {
+      showToast('No tabs to save');
+      return;
+    }
+
+    try {
+      for (const t of savable) {
+        await saveTabForLater({ url: t.url, title: t.title || t.url });
+      }
+    } catch (err) {
+      console.error('[tab-out] Failed to save tabs:', err);
+      showToast('Failed to save tabs');
+      return;
+    }
+
+    const urls     = savable.map(t => t.url);
+    const useExact = group.domain === '__landing-pages__' || !!group.label;
+    if (useExact) {
+      await closeTabsExact(urls);
+    } else {
+      await closeTabsByUrls(urls);
+    }
+
+    if (card) {
+      playCloseSound();
+      animateCardOut(card);
+    }
+
+    const idx = domainGroups.indexOf(group);
+    if (idx !== -1) domainGroups.splice(idx, 1);
+
+    const groupLabel = group.domain === '__landing-pages__' ? 'Homepages' : (group.label || friendlyDomain(group.domain));
+    showToast(`Saved ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
+
+    const statTabs = document.getElementById('statTabs');
+    if (statTabs) statTabs.textContent = openTabs.length;
+    await renderDeferredColumn();
+    return;
+  }
+
   // ---- Close duplicates, keep one copy ----
   if (action === 'dedup-keep-one') {
     const urlsEncoded = actionEl.dataset.dupeUrls || '';
@@ -1582,6 +1738,36 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // ---- Save ALL open tabs for later (then close them) ----
+  if (action === 'save-all-for-later') {
+    const savable = openTabs.filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'));
+    if (savable.length === 0) {
+      showToast('No tabs to save');
+      return;
+    }
+
+    try {
+      for (const t of savable) {
+        await saveTabForLater({ url: t.url, title: t.title || t.url });
+      }
+    } catch (err) {
+      console.error('[tab-out] Failed to save tabs:', err);
+      showToast('Failed to save tabs');
+      return;
+    }
+
+    await closeTabsByUrls(savable.map(t => t.url));
+    playCloseSound();
+
+    document.querySelectorAll('#openTabsMissions .mission-card').forEach(c => {
+      animateCardOut(c);
+    });
+
+    showToast(`Saved ${savable.length} tab${savable.length !== 1 ? 's' : ''} for later`);
+    await renderDeferredColumn();
+    return;
+  }
+
   // ---- Close ALL open tabs ----
   if (action === 'close-all-open-tabs') {
     const allUrls = openTabs
@@ -1614,6 +1800,24 @@ document.addEventListener('click', (e) => {
     body.style.display = body.style.display === 'none' ? 'block' : 'none';
   }
 });
+
+// ---- Saved-for-later filter + sort + group-by-domain ----
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'deferredFilter') return;
+  renderDeferredColumn();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'deferredSort') return;
+  renderDeferredColumn();
+});
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#deferredGroupToggle');
+  if (!btn) return;
+  setDeferredGroupByDomain(!deferredGroupByDomain);
+  renderDeferredColumn();
+});
+// Initialize toggle's pressed state after DOM is ready
+setDeferredGroupByDomain(deferredGroupByDomain);
 
 // ---- Archive search — filter archived items as user types ----
 document.addEventListener('input', async (e) => {

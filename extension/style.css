@@ -941,38 +941,102 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
    SAVED FOR LATER — Checklist Column + Archive
    ================================================================ */
 
-/* ---- Two-column layout ---- */
+/* ---- Stacked layout (open tabs on top, saved for later below) ---- */
 .dashboard-columns {
-  display: flex;
-  gap: 32px;
-  align-items: flex-start;
+  display: block;
 }
 
-/* Open tabs column keeps the grid layout */
 .dashboard-columns .active-section {
-  flex: 1;
-  min-width: 600px;
+  width: 100%;
+  margin-bottom: 40px;
 }
 
-/* Saved for later column — fixed width on the right, scrolls independently */
 .deferred-column {
-  width: 280px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 32px;
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
+  width: 100%;
 }
 
-/* On narrow screens, stack vertically */
-@media (max-width: 800px) {
-  .dashboard-columns {
-    flex-direction: column;
-  }
-  .deferred-column {
-    width: 100%;
-    position: static;
-  }
+.deferred-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+
+.deferred-controls .deferred-filter {
+  flex: 1;
+  margin: 0;
+}
+
+.deferred-sort {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.deferred-sort:focus {
+  border-color: var(--accent-amber);
+}
+
+.deferred-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.deferred-group-toggle:hover {
+  border-color: var(--accent-amber);
+}
+
+.deferred-group-toggle[aria-pressed="true"] {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: #fff;
+}
+
+.deferred-group {
+  margin-top: 14px;
+}
+
+.deferred-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(154, 145, 138, 0.18);
+}
+
+.deferred-group-header .deferred-group-favicon {
+  width: 14px;
+  height: 14px;
+}
+
+.deferred-group-header .deferred-group-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.deferred-group-header .deferred-group-count {
+  margin-left: auto;
+  color: var(--muted);
 }
 
 /* ---- Checklist items ---- */
