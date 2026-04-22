@@ -751,6 +751,10 @@ const ICONS = {
 let domainGroups = [];
 let showWindowLabels = false;
 let windowNameMap = {};
+let expandAllChips = (() => {
+  try { return localStorage.getItem('tabout.expandAllChips') === '1'; }
+  catch { return false; }
+})();
 
 
 /* ----------------------------------------------------------------
@@ -919,7 +923,7 @@ function renderDomainCard(group) {
     if (!seen.has(tab.url)) { seen.add(tab.url); uniqueTabs.push(tab); }
   }
 
-  const visibleTabs = uniqueTabs.slice(0, 8);
+  const visibleTabs = expandAllChips ? uniqueTabs : uniqueTabs.slice(0, 8);
   const extraCount  = uniqueTabs.length - visibleTabs.length;
 
   const pageChips = visibleTabs.map(tab => {
@@ -1357,7 +1361,8 @@ async function renderStaticDashboard() {
       ? ` <button class="action-btn${showWindowLabels ? ' primary' : ''}" data-action="toggle-window-labels" style="font-size:11px;padding:3px 10px;">
           ${ICONS.tabs}
           ${showWindowLabels ? 'Hide' : 'Show'} windows</button>` : '';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${winCount > 1 ? ` &middot; ${winCount} windows` : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button> <button class="action-btn save-tabs" data-action="save-all-for-later" style="font-size:11px;padding:3px 10px;">${ICONS.archive} Save for later</button>${mergeBtn}${showWinToggle}`;
+    const expandBtn = ` <button class="action-btn${expandAllChips ? ' primary' : ''}" data-action="toggle-expand-all" style="font-size:11px;padding:3px 10px;" title="Expand all tabs in every domain card">${expandAllChips ? 'Collapse' : 'Expand all'}</button>`;
+    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${winCount > 1 ? ` &middot; ${winCount} windows` : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button> <button class="action-btn save-tabs" data-action="save-all-for-later" style="font-size:11px;padding:3px 10px;">${ICONS.archive} Save for later</button>${expandBtn}${mergeBtn}${showWinToggle}`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1896,6 +1901,14 @@ document.addEventListener('click', async (e) => {
   // ---- Toggle window labels on tabs ----
   if (action === 'toggle-window-labels') {
     showWindowLabels = !showWindowLabels;
+    await renderDashboard();
+    return;
+  }
+
+  // ---- Toggle expand-all chips ----
+  if (action === 'toggle-expand-all') {
+    expandAllChips = !expandAllChips;
+    try { localStorage.setItem('tabout.expandAllChips', expandAllChips ? '1' : '0'); } catch {}
     await renderDashboard();
     return;
   }
